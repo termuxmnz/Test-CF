@@ -1,0 +1,15 @@
+{
+  "name": "code-forge-pedidos-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demonstração full-stack de pedidos, estoque, painel e WhatsApp da Code Forge.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "reset": "node scripts/reset-db.js",
+    "test": "node tests/smoke.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
