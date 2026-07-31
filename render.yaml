@@ -1,0 +1,26 @@
+'use strict';
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+const ROOT = path.resolve(__dirname, '..');
+const PORT = 3210;
+const BASE = `http://127.0.0.1:${PORT}`;
+fs.copyFileSync(path.join(ROOT,'data','db.seed.json'), path.join(ROOT,'data','db.json'));
+const child=spawn(process.execPath,['server.js'],{cwd:ROOT,env:{...process.env,PORT:String(PORT)},stdio:['ignore','pipe','pipe']});
+let log='';child.stdout.on('data',d=>log+=d);child.stderr.on('data',d=>log+=d);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function request(url,options={}){const r=await fetch(BASE+url,options);const d=await r.json();return{r,d}}
+(async()=>{
+  for(let i=0;i<40;i++){try{const r=await fetch(BASE+'/api/catalog?store=restaurant');if(r.ok)break}catch{}await sleep(100)}
+  let {d:cat}=await request('/api/catalog?store=restaurant');assert.equal(cat.products.length,4);assert(cat.products.every(p=>p.stock===4));
+  const payload={store:'restaurant',idempotencyKey:'smoke-order',items:[{productId:'restaurant-feijoada',quantity:4,selections:{cutlery:['no-cutlery'],add:[]},note:'teste'}],customer:{name:'Teste Smoke',phone:'79999999999'},fulfillment:'pickup',paymentMethod:'Pix'};
+  let {r,d}=await request('/api/orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});assert.equal(r.status,201);assert.equal(d.order.total,14396);const orderId=d.order.id;
+  ({d}=await request('/api/orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}));assert.equal(d.duplicate,true);
+  ({d:cat}=await request('/api/catalog?store=restaurant'));assert.equal(cat.products.find(p=>p.id==='restaurant-feijoada').stock,0);
+  const login=await fetch(BASE+'/api/admin/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:'admin@codeforge.test',password:'CodeForge@2026'})});const ld=await login.json();const cookie=(login.headers.get('set-cookie')||'').split(';')[0];assert(ld.csrf&&cookie);
+  const dash=await fetch(BASE+'/api/admin/dashboard',{headers:{cookie}});const dd=await dash.json();assert.equal(dd.orders.length,1);
+  const cancel=await fetch(BASE+`/api/admin/orders/${orderId}/status`,{method:'PATCH',headers:{cookie,'content-type':'application/json','x-csrf-token':ld.csrf},body:JSON.stringify({status:'cancelado'})});assert.equal(cancel.status,200);
+  ({d:cat}=await request('/api/catalog?store=restaurant'));assert.equal(cat.products.find(p=>p.id==='restaurant-feijoada').stock,4);
+  console.log('Smoke test concluído: catálogo, pedido, idempotência, estoque, painel e cancelamento.');
+})().catch(err=>{console.error(log);console.error(err);process.exitCode=1}).finally(()=>{child.kill('SIGTERM');fs.copyFileSync(path.join(ROOT,'data','db.seed.json'),path.join(ROOT,'data','db.json'))});
